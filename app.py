@@ -23,37 +23,43 @@ st.markdown("""
     }
     /* 指标卡片样式 */
     div[data-testid="metric-container"] {
-        background-color: #f8f9fa;
-        border: 1px solid #e9ecef;
+        background-color: #ffffff;
+        border: 1px solid #e0e0e0;
         padding: 15px;
-        border-radius: 10px;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
-        transition: transform 0.2s;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        transition: all 0.2s ease;
     }
     div[data-testid="metric-container"]:hover {
-        transform: scale(1.02);
-        box-shadow: 3px 3px 10px rgba(0,0,0,0.1);
-    }
-    /* 调整标题边距 */
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 核心修复：直接加载本地字体文件 ---
-font_path = './csi500_data/NotoSerifCJKsc-Regular.otf' 
-if os.path.exists(font_path):
-    fm.fontManager.addfont(font_path)
-    custom_font = fm.FontProperties(fname=font_path)
-    font_name = custom_font.get_name()
-    plt.rcParams['font.family'] = font_name
-else:
-    st.error(f"⚠️ 未找到字体文件：{font_path}，请检查路径！")
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS']
+# --- 核心修复：更稳健的字体加载逻辑 ---
+# 建议上传 SimHei.ttf 到 csi500_data 文件夹，它的兼容性最好
+font_path = './csi500_data/SimHei.ttf' 
+
+# 使用 try-except 防止因为字体文件坏了导致整个 App 崩溃
+try:
+    if os.path.exists(font_path):
+        fm.fontManager.addfont(font_path)
+        custom_font = fm.FontProperties(fname=font_path)
+        font_name = custom_font.get_name()
+        plt.rcParams['font.family'] = font_name
+        # print(f"成功加载本地字体: {font_name}")
+    else:
+        # 如果找不到文件，静默回退，不要报错
+        print(f"提示：未在 {font_path} 找到字体文件，尝试使用系统默认字体。")
+        plt.rcParams['font.sans-serif'] = ['Noto Sans CJK SC', 'SimHei', 'Arial Unicode MS']
+except Exception as e:
+    # 万一字体文件损坏，捕获异常，保证程序能跑
+    print(f"字体加载异常 (已忽略): {e}")
+    plt.rcParams['font.sans-serif'] = ['Noto Sans CJK SC', 'SimHei', 'Arial Unicode MS']
 
 plt.rcParams['axes.unicode_minus'] = False
+# ----------------------------------------
 
 BACKTEST_START = "2024-01-01"
 BACKTEST_END   = "2026-01-15"
@@ -66,6 +72,11 @@ HEAT_WINDOW = 20
 @st.cache_data
 def load_data():
     path_prefix = "./csi500_data/"
+    # 简单的容错：如果文件不存在，提示用户
+    if not os.path.exists(f"{path_prefix}sh.000905.csv"):
+        st.error("❌ 数据文件未找到！请确保 sh.000905.csv 等文件已上传到 csi500_data 目录。")
+        return pd.DataFrame()
+
     df_index = pd.read_csv(f"{path_prefix}sh.000905.csv") 
     df_breadth = pd.read_csv(f"{path_prefix}csi500_breadth_daily.csv") 
     df_master = pd.read_csv(f"{path_prefix}CSI500_Master_Strategy.csv")
@@ -108,6 +119,8 @@ def load_data():
 # 3. 仿真引擎 (逻辑保持不变)
 # ==========================================
 def run_strategy(df_main):
+    if df_main.empty: return pd.DataFrame()
+    
     temp = df_main.copy()
     temp['pos'], temp['signal'] = 0, 0
     in_pos, logic_state, entry_idx, entry_high = False, "", 0, 0
@@ -155,6 +168,9 @@ def run_strategy(df_main):
 
 # 数据计算
 df_input = load_data()
+if df_input.empty:
+    st.stop() # 数据没加载成功就停止渲染
+
 res = run_strategy(df_input)
 res_bench = (1 + df_input['close'].pct_change().fillna(0)).cumprod()
 
@@ -179,9 +195,7 @@ def get_stats(cum_series):
 s_tot, s_ann, s_mdd = get_stats(res['cum_ret'])
 b_tot, b_ann, b_mdd = get_stats(res_bench)
 
-# 使用四列布局，使视觉更开阔
 col1, col2, col3, col4 = st.columns(4)
-
 with col1:
     st.metric(label="🚀 策略累计收益", value=f"{s_tot:.2f}%", delta=f"年化 {s_ann:.2f}%")
 with col2:
@@ -196,21 +210,21 @@ st.markdown("---")
 # 4.3 核心图表区 (美化版)
 st.subheader("📈 全维度数据视图")
 
-# 设置图表风格为更现代的风格
+# 设置图表风格
 plt.style.use('seaborn-v0_8-whitegrid')
 
 fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(16, 30), sharex=True, 
                                         gridspec_kw={'height_ratios': [2, 0.8, 0.8, 1.2, 1.2]})
 
-# 统一背景色为透明，融入网页
+# 统一背景色
 fig.patch.set_facecolor('none')
 for ax in [ax1, ax2, ax3, ax4, ax5]:
     ax.set_facecolor('none')
     ax.tick_params(axis='both', which='major', labelsize=10)
 
-# 图1: 收益与买卖点 (颜色优化)
+# 图1: 收益与买卖点
 ax1.plot(res_bench, label='中证500基准', color='#95a5a6', alpha=0.5, linestyle='--', linewidth=1.5)
-ax1.plot(res['cum_ret'], label='MA30同步版策略', color='#c0392b', linewidth=2.5) # 深红
+ax1.plot(res['cum_ret'], label='MA30同步版策略', color='#c0392b', linewidth=2.5) 
 for sig, col, mark in [(1, '#e74c3c', '^'), (-1, '#27ae60', 'v')]:
     pts = res[res['signal'] == sig]
     ax1.scatter(pts.index, res.loc[pts.index, 'cum_ret'], color=col, marker=mark, s=180, zorder=5, edgecolors='white', linewidth=1.5)
@@ -240,8 +254,8 @@ ax4_left.legend(loc='upper left', fontsize=9)
 ax4_right.legend(loc='upper right', fontsize=9)
 ax4_right.set_ylabel("新高占比 %")
 
-# 图5: ETF对比 (使用更和谐的色板)
-colors = ['#2c3e50', '#27ae60', '#c0392b', '#8e44ad'] # 蓝灰, 绿, 红, 紫
+# 图5: ETF对比
+colors = ['#2c3e50', '#27ae60', '#c0392b', '#8e44ad']
 etfs = {"510050": "上证50", "510300": "沪深300", "510500": "中证500", "512100": "中证1000"}
 for i, (code, label) in enumerate(etfs.items()):
     ax5.plot(res.index, res[f'turnover_{code}'], label=f"{label}", color=colors[i], alpha=0.8, linewidth=1.5)
@@ -263,15 +277,12 @@ prev = res.iloc[-2]
 if latest['close'] > latest['MA_Filter'] and latest['MA_Filter'] > prev['MA_Filter']:
     mode = "🐂 多头趋势"
     mode_desc = "价格站上MA30且均线向上"
-    mode_color = "green"
 elif latest['close'] < latest['MA_Filter'] and latest['MA_Filter'] < prev['MA_Filter']:
     mode = "🐻 空头趋势"
     mode_desc = "价格跌破MA30且均线向下"
-    mode_color = "red"
 else:
     mode = "🦓 震荡整理"
     mode_desc = "价格与均线纠缠或方向不明"
-    mode_color = "orange"
 
 # 提醒逻辑
 signal, pos = latest['signal'], latest['pos']
@@ -288,14 +299,12 @@ else:
     action = "🛡️ 空仓观望"
     action_type = "secondary"
 
-# 逻辑描述
 logic_desc = []
 if latest['breadth'] < 16: logic_desc.append("📉 广度冰点")
 if latest['Heat_Z'] > 1.5: logic_desc.append("🔥 资金过热")
 if latest['new_high_pct'] > 5: logic_desc.append("💪 新高增强")
 final_logic = " | ".join(logic_desc) if logic_desc else "🌊 市场处于常规波动区间"
 
-# 使用 Container 布局增强可读性
 with st.container():
     c1, c2, c3, c4 = st.columns([1.5, 1, 1, 1.5])
     
@@ -303,25 +312,17 @@ with st.container():
         st.markdown(f"#### 1. 市场模式")
         st.markdown(f"**{mode}**")
         st.caption(mode_desc)
-        
     with c2:
         st.markdown(f"#### 2. 资金热度")
         st.metric("Z-Score", f"{latest['Heat_Z']:.2f}", delta=None)
-        
     with c3:
         st.markdown(f"#### 3. 市场结构")
         st.metric("广度 / 新高", f"{latest['breadth']:.0f}%", delta=f"{latest['new_high_pct']:.1f}% 新高")
-        
     with c4:
         st.markdown(f"#### 4. 操作建议")
-        if action_type == "success":
-            st.success(f"### {action}")
-        elif action_type == "error":
-            st.error(f"### {action}")
-        elif action_type == "info":
-            st.info(f"### {action}")
-        else:
-            st.secondary(f"### {action}") # Streamlit 新版本支持，如果报错请改为 st.info
+        if action_type == "success": st.success(f"### {action}")
+        elif action_type == "error": st.error(f"### {action}")
+        elif action_type == "info": st.info(f"### {action}")
+        else: st.info(f"### {action}") # 这里的 secondary 某些旧版不支持，改回 info 保底
 
-    # 底部逻辑栏
     st.info(f"**逻辑扫描：** {final_logic}")
