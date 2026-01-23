@@ -238,11 +238,40 @@ with c_l:
     else: st.warning(f"### 指令：{action}")
 
 with c_r:
+    # 1. 初始化深度逻辑列表
     logic_desc = []
-    if latest['breadth'] < 16: logic_desc.append("📉 [预警] 广度冰点，关注反抽机会")
-    if latest['Heat_Z'] > 1.5: logic_desc.append("🔥 [风险] 资金过热，需防范冲高回落")
-    st.markdown("**逻辑实时扫描：**")
+    
+    # --- 深度维度 A：市场广度 (Breadth) ---
+    if latest['breadth'] < 16:
+        logic_desc.append("📉 **[极端冰点逻辑]**：全场仅不足16%个股站上均线。历史经验表明，此阶段市场处于极度恐慌或卖盘枯竭状态，极易触发“物极必反”的报复性反抽，适合左侧关注，但不宜盲目重仓。")
+    elif latest['breadth'] > 80:
+        logic_desc.append("🚩 **[广度高位警示]**：超80%个股已在均线上方。这通常是趋势亢奋期的特征，虽然赚钱效应好，但也意味着潜在买盘可能耗尽，需警惕高位震荡或“缩量阴跌”的开始。")
+    
+    # --- 深度维度 B：资金热度 (Heat Z-Score) ---
+    if latest['Heat_Z'] > 1.5:
+        logic_desc.append("🔥 **[情绪过热逻辑]**：成交量爆出近20日均值1.5倍标准差。这代表市场情绪已达高潮。量能极速释放后往往伴随动能衰竭，实战中应警惕“最后一把火”后的快速回撤。")
+    elif latest['Heat_Z'] < -1.5:
+        logic_desc.append("🧊 **[交投冷清逻辑]**：成交极度萎缩。这通常发生在阴跌末期或长假前，市场缺乏主攻资金，波动率将降低，适合耐心等待放量信号出现。")
+        
+    # --- 深度维度 C：季度强度 (New Highs) ---
+    if latest['new_high_pct'] > 5:
+        logic_desc.append("💪 **[内生动力增强]**：创60日新高的个股占比显著。这表明市场并非仅靠少数权重股拉升，而是具备广泛的“赚钱效应”和“领涨先锋”，趋势的延续性通常较强。")
+    
+    # --- 深度维度 D：趋势保护 (MA Filter) ---
+    if latest['close'] > latest['MA_Filter']:
+        logic_desc.append("✅ **[趋势生命线保护]**：当前价格站稳在 MA30 之上，且均线具备正向斜率。只要不放量跌破该防守位，中线“看多做多”的逻辑基石依然稳固。")
+    else:
+        logic_desc.append("⚠️ **[趋势压制风险]**：价格处于 MA30 下方。这属于典型的空头排布，任何反弹在没有收复生命线之前，都应视为“技术性抽风”而非真正的反转。")
+
+    # 2. UI 渲染
+    st.markdown("#### 🔍 逻辑实时深度扫描：")
+    
     if logic_desc:
-        for item in logic_desc: st.write(item)
-    else: st.write("✅ 暂无极端极端信号。")
-    st.caption(f"指标快照：广度 {latest['breadth']:.1f}% | 热度 {latest['Heat_Z']:.2f} | 新高比例 {latest['new_high_pct']:.2f}%")
+        for item in logic_desc:
+            st.write(item)
+    else:
+        st.write("✅ **[状态正常]**：目前各项指标处于常规波动区间。未捕捉到极端过热、冰点或趋势拐点信号，建议遵循原有策略惯性运行。")
+    
+    st.divider()
+    # 增加一个技术快照栏
+    st.caption(f"指标快照：广度 {latest['breadth']:.1f}% | 20日热度 {latest['Heat_Z']:.2f}σ | 季度新高比例 {latest['new_high_pct']:.2f}%")
