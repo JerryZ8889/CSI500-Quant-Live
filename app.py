@@ -2,39 +2,58 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import os
-
-# ==========================================
-# 1. 网页基础配置与核心参数 (本地字体强力版)
-# ==========================================
-st.set_page_config(page_title="中证500量化实战决策中心", layout="wide")
-
-import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import os
 
-# --- 核心修复：直接加载本地字体文件 ---
-# 假设你把字体文件传到了 csi500_data 文件夹，文件名必须完全一致！
-font_path = './csi500_data/NotoSerifCJKsc-Regular.otf' 
+# ==========================================
+# 1. 网页基础配置与视觉优化
+# ==========================================
+st.set_page_config(
+    page_title="中证500量化实战决策中心", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# 检查字体文件是否真的存在
+# --- 注入自定义 CSS (美化关键) ---
+st.markdown("""
+    <style>
+    /* 全局字体优化 */
+    .stApp {
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    }
+    /* 指标卡片样式 */
+    div[data-testid="metric-container"] {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+        transition: transform 0.2s;
+    }
+    div[data-testid="metric-container"]:hover {
+        transform: scale(1.02);
+        box-shadow: 3px 3px 10px rgba(0,0,0,0.1);
+    }
+    /* 调整标题边距 */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 核心修复：直接加载本地字体文件 ---
+font_path = './csi500_data/NotoSerifCJKsc-Regular.otf' 
 if os.path.exists(font_path):
-    # 1. 将字体文件加入 matplotlib 的管理器
     fm.fontManager.addfont(font_path)
-    # 2. 获取该字体的内部名称
     custom_font = fm.FontProperties(fname=font_path)
     font_name = custom_font.get_name()
-    # 3. 强制设置为全局默认字体
     plt.rcParams['font.family'] = font_name
-    # print(f"成功加载字体: {font_name}") # 调试用
 else:
-    # 保底方案（如果文件没传对，还是尝试系统字体）
     st.error(f"⚠️ 未找到字体文件：{font_path}，请检查路径！")
     plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS']
 
-# 解决负号显示问题
 plt.rcParams['axes.unicode_minus'] = False
-# --- 修复结束 ---
 
 BACKTEST_START = "2024-01-01"
 BACKTEST_END   = "2026-01-15"
@@ -42,11 +61,10 @@ MA_FILTER_WINDOW = 30
 HEAT_WINDOW = 20
 
 # ==========================================
-# 2. 数据整合加载 (路径已针对GitHub结构优化)
+# 2. 数据整合加载 (逻辑保持不变)
 # ==========================================
 @st.cache_data
 def load_data():
-    # 路径确保指向你的GitHub子文件夹
     path_prefix = "./csi500_data/"
     df_index = pd.read_csv(f"{path_prefix}sh.000905.csv") 
     df_breadth = pd.read_csv(f"{path_prefix}csi500_breadth_daily.csv") 
@@ -87,7 +105,7 @@ def load_data():
     return df.sort_values('date').set_index('date').loc[BACKTEST_START:BACKTEST_END]
 
 # ==========================================
-# 3. 仿真引擎 (核心逻辑完全保留)
+# 3. 仿真引擎 (逻辑保持不变)
 # ==========================================
 def run_strategy(df_main):
     temp = df_main.copy()
@@ -97,10 +115,10 @@ def run_strategy(df_main):
     cond_comp_b = (temp['breadth'] < 16)
     cond_comp_s = (temp['breadth'] > 79) & (temp['Heat_Z'] < 1.5)
     cond_fn_b_base = (temp['close'] > temp['MA_Trend']) & \
-                     (temp['Consec_Gains'].shift(1) >= 3) & \
-                     (temp['close'] < temp['close'].shift(1)) & \
-                     (temp['Turnover_Pct'] > 1.0) & \
-                     (temp['close'] > temp['MA_Support'])
+                      (temp['Consec_Gains'].shift(1) >= 3) & \
+                      (temp['close'] < temp['close'].shift(1)) & \
+                      (temp['Turnover_Pct'] > 1.0) & \
+                      (temp['close'] > temp['MA_Support'])
 
     for i in range(len(temp)):
         if i == 0: continue
@@ -135,18 +153,22 @@ def run_strategy(df_main):
     temp['cum_ret'] = (1 + temp['strat_ret']).cumprod()
     return temp
 
-# 数据加载与运行
+# 数据计算
 df_input = load_data()
 res = run_strategy(df_input)
 res_bench = (1 + df_input['close'].pct_change().fillna(0)).cumprod()
 
 # ==========================================
-# 4. 网页布局展示 (指标对齐统计)
+# 4. 网页布局展示 (UI 美化版)
 # ==========================================
-st.title("🛡️ 中证500量化实战决策看板")
 
+# 4.1 头部标题区
+st.markdown("## 🛡️ 中证500 | 量化实战决策看板")
+st.markdown("---")
+
+# 4.2 绩效卡片区
 st.subheader("📊 策略绩效统计")
-cols = st.columns(2)
+
 def get_stats(cum_series):
     total = (cum_series.iloc[-1] - 1) * 100
     mdd = ((cum_series - cum_series.cummax()) / cum_series.cummax()).min() * 100
@@ -157,77 +179,149 @@ def get_stats(cum_series):
 s_tot, s_ann, s_mdd = get_stats(res['cum_ret'])
 b_tot, b_ann, b_mdd = get_stats(res_bench)
 
-with cols[0]:
-    st.metric("策略累计收益", f"{s_tot:.2f}%", f"年化: {s_ann:.2f}%")
-    st.write(f"策略最大回撤: {s_mdd:.2f}%")
-with cols[1]:
-    st.metric("中证500基准收益", f"{b_tot:.2f}%", f"年化: {b_ann:.2f}%", delta_color="inverse")
-    st.write(f"基准最大回撤: {b_mdd:.2f}%")
+# 使用四列布局，使视觉更开阔
+col1, col2, col3, col4 = st.columns(4)
 
-st.divider()
+with col1:
+    st.metric(label="🚀 策略累计收益", value=f"{s_tot:.2f}%", delta=f"年化 {s_ann:.2f}%")
+with col2:
+    st.metric(label="📉 策略最大回撤", value=f"{s_mdd:.2f}%", delta_color="off")
+with col3:
+    st.metric(label="🏛️ 基准累计收益", value=f"{b_tot:.2f}%", delta=f"年化 {b_ann:.2f}%")
+with col4:
+    st.metric(label="🌊 基准最大回撤", value=f"{b_mdd:.2f}%", delta_color="off")
 
-# B. 五图联动可视化 (对齐代码A风格)
+st.markdown("---")
+
+# 4.3 核心图表区 (美化版)
 st.subheader("📈 全维度数据视图")
+
+# 设置图表风格为更现代的风格
+plt.style.use('seaborn-v0_8-whitegrid')
+
 fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(16, 30), sharex=True, 
                                         gridspec_kw={'height_ratios': [2, 0.8, 0.8, 1.2, 1.2]})
-# 图1: 收益与买卖点
-ax1.plot(res_bench, label='中证500基准', color='gray', alpha=0.3, linestyle='--')
-ax1.plot(res['cum_ret'], label='MA30同步版策略', color='crimson', linewidth=2)
-for sig, col, mark in [(1, 'red', '^'), (-1, 'green', 'v')]:
+
+# 统一背景色为透明，融入网页
+fig.patch.set_facecolor('none')
+for ax in [ax1, ax2, ax3, ax4, ax5]:
+    ax.set_facecolor('none')
+    ax.tick_params(axis='both', which='major', labelsize=10)
+
+# 图1: 收益与买卖点 (颜色优化)
+ax1.plot(res_bench, label='中证500基准', color='#95a5a6', alpha=0.5, linestyle='--', linewidth=1.5)
+ax1.plot(res['cum_ret'], label='MA30同步版策略', color='#c0392b', linewidth=2.5) # 深红
+for sig, col, mark in [(1, '#e74c3c', '^'), (-1, '#27ae60', 'v')]:
     pts = res[res['signal'] == sig]
-    ax1.scatter(pts.index, res.loc[pts.index, 'cum_ret'], color=col, marker=mark, s=150, zorder=5)
-ax1.set_title("策略绩效与实战信号分布", fontsize=15); ax1.legend(loc='upper left'); ax1.grid(True, alpha=0.2)
+    ax1.scatter(pts.index, res.loc[pts.index, 'cum_ret'], color=col, marker=mark, s=180, zorder=5, edgecolors='white', linewidth=1.5)
+ax1.set_title("策略绩效与实战信号分布", fontsize=16, fontweight='bold', pad=15)
+ax1.legend(loc='upper left', frameon=True, facecolor='white', framealpha=0.9)
+
 # 图2: 广度
-ax2.plot(res.index, res['breadth'], color='orange', label='MA20上方占比 (%)')
-ax2.fill_between(res.index, 0, 100, where=(res['pos']==1), color='blue', alpha=0.1)
-ax2.set_title("市场广度波动环境", fontsize=12); ax2.set_ylim(0, 100); ax2.grid(True, alpha=0.2)
+ax2.plot(res.index, res['breadth'], color='#f39c12', label='MA20上方占比 (%)', linewidth=1.5)
+ax2.fill_between(res.index, 0, 100, where=(res['pos']==1), color='#3498db', alpha=0.1)
+ax2.set_title("市场广度波动环境", fontsize=14, pad=10)
+ax2.set_ylim(0, 100)
+ax2.set_ylabel("占比 %")
+
 # 图3: 热度
-ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']>=0), color='red', alpha=0.4)
-ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']<0), color='blue', alpha=0.4)
-ax3.axhline(y=1.5, color='darkorange', linestyle='--', label='过热线')
-ax3.set_title("资金热度 (20日 Z-Score)", fontsize=12); ax3.legend(loc='upper left')
+ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']>=0), color='#e74c3c', alpha=0.5, label='资金流入')
+ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']<0), color='#2980b9', alpha=0.5, label='资金流出')
+ax3.axhline(y=1.5, color='#d35400', linestyle='--', linewidth=1.5, label='过热警戒线 (1.5)')
+ax3.set_title("资金热度 (20日 Z-Score)", fontsize=14, pad=10)
+ax3.legend(loc='upper left', fontsize=9)
+
 # 图4: 趋势双轴
 ax4_left = ax4; ax4_right = ax4.twinx()
-ax4_left.plot(res.index, res['breadth'], color='#1f77b4', linewidth=1.8, label='站上MA20占比')
-ax4_right.bar(res.index, res['new_high_pct'], color='sandybrown', alpha=0.6, width=0.8, label='60日新高占比')
-ax4_left.set_title("市场广度与季度强度趋势对比", fontsize=12); ax4_left.legend(loc='upper left'); ax4_right.legend(loc='upper right')
-# 图5: ETF对比
-colors = ['darkblue', 'green', 'red', 'purple']
+ax4_left.plot(res.index, res['breadth'], color='#2980b9', linewidth=2, label='站上MA20占比')
+ax4_right.bar(res.index, res['new_high_pct'], color='#e67e22', alpha=0.5, width=1.0, label='60日新高占比')
+ax4_left.set_title("市场广度与季度强度趋势对比", fontsize=14, pad=10)
+ax4_left.legend(loc='upper left', fontsize=9)
+ax4_right.legend(loc='upper right', fontsize=9)
+ax4_right.set_ylabel("新高占比 %")
+
+# 图5: ETF对比 (使用更和谐的色板)
+colors = ['#2c3e50', '#27ae60', '#c0392b', '#8e44ad'] # 蓝灰, 绿, 红, 紫
 etfs = {"510050": "上证50", "510300": "沪深300", "510500": "中证500", "512100": "中证1000"}
 for i, (code, label) in enumerate(etfs.items()):
-    ax5.plot(res.index, res[f'turnover_{code}'], label=f"{label} 换手率", color=colors[i], alpha=0.8)
-ax5.set_title("核心风格 ETF 换手率对比", fontsize=12); ax5.legend(loc='upper left', ncol=4); ax5.grid(True, alpha=0.2)
+    ax5.plot(res.index, res[f'turnover_{code}'], label=f"{label}", color=colors[i], alpha=0.8, linewidth=1.5)
+ax5.set_title("核心风格 ETF 换手率对比", fontsize=14, pad=10)
+ax5.legend(loc='upper left', ncol=4, fontsize=10)
+
 plt.tight_layout()
-st.pyplot(fig) # 重要：网页端必须使用 st.pyplot
+st.pyplot(fig)
 
 st.divider()
 
-# C. 实战决策报告
+# 4.4 决策看板 (布局重构)
 st.subheader("📝 实战决策总结")
+
 latest = res.iloc[-1]
 prev = res.iloc[-2]
+
 # 模式判定
 if latest['close'] > latest['MA_Filter'] and latest['MA_Filter'] > prev['MA_Filter']:
-    mode = "多头 (价格站上MA30且均线向上)"
+    mode = "🐂 多头趋势"
+    mode_desc = "价格站上MA30且均线向上"
+    mode_color = "green"
 elif latest['close'] < latest['MA_Filter'] and latest['MA_Filter'] < prev['MA_Filter']:
-    mode = "空头 (价格跌破MA30且均线向下)"
+    mode = "🐻 空头趋势"
+    mode_desc = "价格跌破MA30且均线向下"
+    mode_color = "red"
 else:
-    mode = "震荡 (价格与均线纠缠或方向不明)"
+    mode = "🦓 震荡整理"
+    mode_desc = "价格与均线纠缠或方向不明"
+    mode_color = "orange"
+
 # 提醒逻辑
 signal, pos = latest['signal'], latest['pos']
-if signal == 1: action = "🚨 买入提醒"
-elif signal == -1: action = "🚨 卖出提醒"
-elif pos == 1: action = "💎 持股待涨"
-else: action = "🛡️ 空仓观望"
+if signal == 1: 
+    action = "🚨 买入信号"
+    action_type = "success"
+elif signal == -1: 
+    action = "🚨 卖出信号"
+    action_type = "error"
+elif pos == 1: 
+    action = "💎 持股待涨"
+    action_type = "info"
+else: 
+    action = "🛡️ 空仓观望"
+    action_type = "secondary"
+
 # 逻辑描述
 logic_desc = []
-if latest['breadth'] < 16: logic_desc.append("市场广度处于冰点区")
-if latest['Heat_Z'] > 1.5: logic_desc.append("资金热度过高")
-if latest['new_high_pct'] > 5: logic_desc.append("新高占比显著提升")
-st.info(f"""
-**1. 市场模式**：{mode}  
-**2. 资金热度**：{latest['Heat_Z']:.2f} (20日 Z-Score)  
-**3. 市场状态**：广度 {latest['breadth']:.2f}% | 60日新高比例 {latest['new_high_pct']:.2f}%  
-**4. 操作建议**：{action}  
-**5. 逻辑说明**：{', '.join(logic_desc) if logic_desc else '目前处于常规波动区间'}
-""")
+if latest['breadth'] < 16: logic_desc.append("📉 广度冰点")
+if latest['Heat_Z'] > 1.5: logic_desc.append("🔥 资金过热")
+if latest['new_high_pct'] > 5: logic_desc.append("💪 新高增强")
+final_logic = " | ".join(logic_desc) if logic_desc else "🌊 市场处于常规波动区间"
+
+# 使用 Container 布局增强可读性
+with st.container():
+    c1, c2, c3, c4 = st.columns([1.5, 1, 1, 1.5])
+    
+    with c1:
+        st.markdown(f"#### 1. 市场模式")
+        st.markdown(f"**{mode}**")
+        st.caption(mode_desc)
+        
+    with c2:
+        st.markdown(f"#### 2. 资金热度")
+        st.metric("Z-Score", f"{latest['Heat_Z']:.2f}", delta=None)
+        
+    with c3:
+        st.markdown(f"#### 3. 市场结构")
+        st.metric("广度 / 新高", f"{latest['breadth']:.0f}%", delta=f"{latest['new_high_pct']:.1f}% 新高")
+        
+    with c4:
+        st.markdown(f"#### 4. 操作建议")
+        if action_type == "success":
+            st.success(f"### {action}")
+        elif action_type == "error":
+            st.error(f"### {action}")
+        elif action_type == "info":
+            st.info(f"### {action}")
+        else:
+            st.secondary(f"### {action}") # Streamlit 新版本支持，如果报错请改为 st.info
+
+    # 底部逻辑栏
+    st.info(f"**逻辑扫描：** {final_logic}")
