@@ -5,18 +5,36 @@ import matplotlib.pyplot as plt
 import os
 
 # ==========================================
-# 1. 网页基础配置与核心参数 (完全对齐代码A)
+# 1. 网页基础配置与核心参数 (修复乱码版)
 # ==========================================
 st.set_page_config(page_title="中证500量化实战决策中心", layout="wide")
 
-# 线上环境字体兼容性处理
-plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS']
-plt.rcParams['axes.unicode_minus'] = False
+# --- 核心修复开始 ---
+import matplotlib.font_manager as fm
+
+# 1. 优先尝试加载 Linux 服务器上的中文字体 (Noto Sans CJK)
+# 这对应你在 packages.txt 里安装的 fonts-noto-cjk
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = [
+    'Noto Sans CJK SC',    # Linux (Streamlit Cloud) 首选
+    'SimHei',              # Windows 首选
+    'Arial Unicode MS',    # Mac 首选
+    'DejaVu Sans'          # 英文保底
+]
+
+# 2. 解决负号显示为方块的问题
+plt.rcParams['axes.unicode_minus'] = False 
+
+# (可选) 强制清除字体缓存，防止 matplotlib 记忆旧的错误配置
+# 仅在 Streamlit Cloud 环境下偶尔需要，如果上面不行，解开下面这行注释
+# import shutil
+# shutil.rmtree(os.path.expanduser('~/.cache/matplotlib'), ignore_errors=True)
+# --- 核心修复结束 ---
 
 BACKTEST_START = "2024-01-01"
 BACKTEST_END   = "2026-01-15"
 MA_FILTER_WINDOW = 30
-HEAT_WINDOW = 20  
+HEAT_WINDOW = 20
 
 # ==========================================
 # 2. 数据整合加载 (路径已针对GitHub结构优化)
