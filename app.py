@@ -6,34 +6,66 @@ import matplotlib.font_manager as fm
 import os
 
 # ==========================================
-# 1. 网页基础配置与视觉美化
+# 1. 网页配置与视觉注入 (Professional UI)
 # ==========================================
-st.set_page_config(page_title="中证500量化实战决策中心", layout="wide")
+st.set_page_config(page_title="中证500量化实战决策中心", layout="wide", initial_sidebar_state="expanded")
 
-# --- 字体加载（局部注入模式：防崩溃 + 治乱码） ---
+# 注入 CSS：打造金融终端质感
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    div[data-testid="metric-container"] {
+        background-color: #ffffff;
+        border: 1px solid #e9ecef;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+    }
+    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #ffffff;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+    }
+    .stTabs [aria-selected="true"] { background-color: #e11d48; color: white; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 字体处理 ---
 font_path = './csi500_data/SimHei.ttf'
 my_font = None
-
 if os.path.exists(font_path):
     try:
-        # 使用 FontProperties 局部调用，不强制注册全局，防止 RuntimeError
         my_font = fm.FontProperties(fname=font_path)
         plt.rcParams['axes.unicode_minus'] = False 
-    except Exception as e:
-        st.sidebar.warning(f"字体加载异常，将使用系统备用字体: {e}")
+    except: pass
+
+# ==========================================
+# 2. 侧边栏：动态参数调节
+# ==========================================
+with st.sidebar:
+    st.header("⚙️ 策略参数配置")
+    date_range = st.date_input("回测时间跨度", 
+                               [pd.to_datetime("2024-01-01"), pd.to_datetime("2026-01-15")])
+    st.divider()
+    ma_window = st.slider("均线趋势过滤窗口 (MA)", 10, 60, 30)
+    heat_window = st.slider("成交量热度窗口", 5, 40, 20)
+    st.divider()
+    st.info("💡 建议：宽幅震荡市调大均线窗口，快速反弹市调小窗口。")
+
+if len(date_range) == 2:
+    BACKTEST_START, BACKTEST_END = date_range[0].strftime('%Y-%m-%d'), date_range[1].strftime('%Y-%m-%d')
 else:
-    st.sidebar.error("⚠️ 未找到 SimHei.ttf，请检查路径！")
+    BACKTEST_START, BACKTEST_END = "2024-01-01", "2026-01-15"
 
 # ==========================================
-# 2. 核心参数与数据引擎 (完全保留你的原逻辑)
+# 3. 数据与引擎 (逻辑保持不动)
 # ==========================================
-BACKTEST_START = "2024-01-01"
-BACKTEST_END   = "2026-01-15"
-MA_FILTER_WINDOW = 30
-HEAT_WINDOW = 20
-
 @st.cache_data
-def load_data():
+def load_data(s_date, e_date, ma_win, h_win):
     path_prefix = "./csi500_data/"
     df_index = pd.read_csv(f"{path_prefix}sh.000905.csv") 
     df_breadth = pd.read_csv(f"{path_prefix}csi500_breadth_daily.csv") 
@@ -45,33 +77,30 @@ def load_data():
     df = pd.merge(df_index, df_breadth[['date', 'breadth']], on='date', how='inner')
     df = pd.merge(df, df_master[['date', 'new_high_pct', 'ETF_Turnover']], on='date', how='left')
     
+    # ETF 换手处理
     etf_codes = ["510050", "510300", "510500", "512100"]
     for code in etf_codes:
         f_path = f"{path_prefix}{code}.csv"
         if os.path.exists(f_path):
             etf_df = pd.read_csv(f_path)
             etf_df['date'] = pd.to_datetime(etf_df['date'])
-            etf_df = etf_df.rename(columns={'turnover': f'turn_raw_{code}'})
-            df = pd.merge(df, etf_df[['date', f'turn_raw_{code}']], on='date', how='left')
-            df[f'turnover_{code}'] = np.where(df[f'turn_raw_{code}'].max() > 1, 
-                                             df[f'turn_raw_{code}'], 
-                                             df[f'turn_raw_{code}'] * 100)
-        else:
-            df[f'turnover_{code}'] = 0
+            df = pd.merge(df, etf_df[['date', 'turnover']], on='date', how='left', suffixes=('', f'_{code}'))
+            df[f'turnover_{code}'] = df[f'turnover_{code}'].fillna(0)
+        else: df[f'turnover_{code}'] = 0
     
     df['new_high_pct'] = df['new_high_pct'].fillna(0)
-    df['MA_Filter'] = df['close'].rolling(MA_FILTER_WINDOW).mean() 
+    df['MA_Filter'] = df['close'].rolling(ma_win).mean() 
     df['MA_Trend'] = df['close'].rolling(10).mean()
     df['MA_Support'] = df['close'].rolling(5).mean()
     df['Is_Up'] = (df['close'] > df['close'].shift(1)).astype(int)
     df['Streak'] = df['Is_Up'].groupby((df['Is_Up'] != df['Is_Up'].shift()).cumsum()).cumcount() + 1
     df['Consec_Gains'] = np.where(df['Is_Up'] == 1, df['Streak'], 0)
-    df['Heat_Z'] = (df['amount'] - df['amount'].rolling(HEAT_WINDOW).mean()) / df['amount'].rolling(HEAT_WINDOW).std()
+    df['Heat_Z'] = (df['amount'] - df['amount'].rolling(h_win).mean()) / df['amount'].rolling(h_win).std()
     
     t_raw = df['ETF_Turnover']
     df['Turnover_Pct'] = np.where(t_raw.max() > 1, t_raw, t_raw * 100)
     
-    return df.sort_values('date').set_index('date').loc[BACKTEST_START:BACKTEST_END]
+    return df.sort_values('date').set_index('date').loc[s_date:e_date]
 
 def run_strategy(df_main):
     temp = df_main.copy()
@@ -89,7 +118,6 @@ def run_strategy(df_main):
     for i in range(len(temp)):
         if i == 0: continue
         curr_close, prev_close, ma30 = temp['close'].iloc[i], temp['close'].iloc[i-1], temp['MA_Filter'].iloc[i]
-        
         if in_pos:
             if logic_state == "FirstNeg" and cond_comp_b.iloc[i]: logic_state = "Composite"
             exit_f = False
@@ -100,12 +128,10 @@ def run_strategy(df_main):
             else:
                 if cond_comp_s.iloc[i]: exit_f = True
                 elif is_below_ma and (is_1d or is_5d): exit_f = True
-            
             if exit_f:
                 temp.iloc[i, temp.columns.get_loc('pos')], temp.iloc[i, temp.columns.get_loc('signal')] = 0, -1
                 in_pos, logic_state = False, ""
-            else:
-                temp.iloc[i, temp.columns.get_loc('pos')] = 1
+            else: temp.iloc[i, temp.columns.get_loc('pos')] = 1
         else:
             buy_trig = False
             if cond_comp_b.iloc[i]: logic_state, buy_trig = "Composite", True
@@ -114,23 +140,23 @@ def run_strategy(df_main):
                 temp.iloc[i, temp.columns.get_loc('pos')], temp.iloc[i, temp.columns.get_loc('signal')] = 1, 1
                 in_pos, entry_idx, entry_high = True, i, temp['high'].iloc[i]
 
-    actual_pos = temp['pos'].shift(1).fillna(0)
-    temp['strat_ret'] = actual_pos * temp['close'].pct_change().fillna(0) - np.where(actual_pos.diff() != 0, 0.001, 0)
+    temp['strat_ret'] = temp['pos'].shift(1).fillna(0) * temp['close'].pct_change().fillna(0) - np.where(temp['pos'].shift(1).diff() != 0, 0.001, 0)
     temp['cum_ret'] = (1 + temp['strat_ret']).cumprod()
     return temp
 
 # 数据加载
-df_input = load_data()
+df_input = load_data(BACKTEST_START, BACKTEST_END, ma_window, heat_window)
 res = run_strategy(df_input)
 res_bench = (1 + df_input['close'].pct_change().fillna(0)).cumprod()
 
 # ==========================================
-# 3. UI 展示与可视化 (大师美化版)
+# 4. 终端级展示 (Professional Dashboard)
 # ==========================================
-st.title("🛡️ 中证500量化实战决策中心")
 
-# --- A. 策略绩效统计卡片 ---
-st.subheader("📊 策略绩效统计")
+st.title("🛡️ 中证500量化实战决策中心")
+st.caption(f"回测周期: {BACKTEST_START} 至 {BACKTEST_END} | 均线过滤: {ma_window}日 | 当前逻辑: 宏观动能+广度错位")
+
+# --- A. 核心绩效看板 (Grid) ---
 def get_stats(cum_series):
     total = (cum_series.iloc[-1] - 1) * 100
     mdd = ((cum_series - cum_series.cummax()) / cum_series.cummax()).min() * 100
@@ -145,96 +171,94 @@ c1, c2, c3, c4 = st.columns(4)
 c1.metric("🚀 策略累计收益", f"{s_tot:.2f}%", f"年化 {s_ann:.2f}%")
 c2.metric("📉 策略最大回撤", f"{s_mdd:.2f}%")
 c3.metric("🏛️ 基准累计收益", f"{b_tot:.2f}%", f"年化 {b_ann:.2f}%", delta_color="inverse")
-c4.metric("🌊 基准最大回撤", f"{b_mdd:.2f}%")
+c4.metric("📊 相对超额收益", f"{s_tot - b_tot:.2f}%", "Alpha")
 
 st.divider()
 
-# --- B. 全维度数据图表 (注入字体属性解决乱码) ---
-st.subheader("📈 全维度数据视图")
-plt.style.use('seaborn-v0_8-whitegrid')
-fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(16, 32), sharex=True, 
-                                        gridspec_kw={'height_ratios': [2, 0.8, 0.8, 1.2, 1.2]})
+# --- B. 数据联动透视 (Tabs Layout) ---
+st.subheader("📊 策略全维度分析")
+tab1, tab2, tab3 = st.tabs(["🔥 绩效表现 & 信号", "🌐 市场广度 & 热度", "💧 流动性 & 风格对比"])
 
-def set_font(ax, title):
-    if my_font:
-        ax.set_title(title, fontproperties=my_font, fontsize=16)
-    else:
-        ax.set_title(title, fontsize=16)
+with tab1:
+    fig1, ax1 = plt.subplots(figsize=(16, 6))
+    ax1.plot(res_bench, label='中证500基准', color='#94a3b8', alpha=0.4, linestyle='--')
+    ax1.plot(res['cum_ret'], label='实战版策略', color='#e11d48', linewidth=2)
+    for sig, col, mark in [(1, '#ef4444', '^'), (-1, '#22c55e', 'v')]:
+        pts = res[res['signal'] == sig]
+        ax1.scatter(pts.index, res.loc[pts.index, 'cum_ret'], color=col, marker=mark, s=150, zorder=5)
+    if my_font: ax1.set_title("策略绩效曲线与买卖信号点分布", fontproperties=my_font, fontsize=16)
+    ax1.legend()
+    st.pyplot(fig1)
 
-# 图1: 收益
-ax1.plot(res_bench, label='基准', color='#94a3b8', alpha=0.4, linestyle='--')
-ax1.plot(res['cum_ret'], label='策略', color='#e11d48', linewidth=2.5)
-for sig, col, mark in [(1, '#ef4444', '^'), (-1, '#22c55e', 'v')]:
-    pts = res[res['signal'] == sig]
-    ax1.scatter(pts.index, res.loc[pts.index, 'cum_ret'], color=col, marker=mark, s=180, zorder=5)
-set_font(ax1, "策略绩效与实战信号分布")
-if my_font: ax1.legend(prop=my_font)
+with tab2:
+    fig2, (ax2, ax3) = plt.subplots(2, 1, figsize=(16, 8), sharex=True)
+    # 广度
+    ax2.plot(res.index, res['breadth'], color='#f59e0b', label='MA20上方占比 (%)')
+    ax2.fill_between(res.index, 0, 100, where=(res['pos']==1), color='#3b82f6', alpha=0.1)
+    if my_font: ax2.set_title("市场广度 (Breadth) 演变", fontproperties=my_font)
+    # 热度
+    ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']>=0), color='#ef4444', alpha=0.5)
+    ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']<0), color='#3b82f6', alpha=0.5)
+    ax3.axhline(y=1.5, color='#d97706', linestyle='--', label='过热线')
+    if my_font: ax3.set_title("资金成交热度 (Heat Z-Score)", fontproperties=my_font)
+    st.pyplot(fig2)
 
-# 图2: 广度
-ax2.plot(res.index, res['breadth'], color='#f59e0b', label='MA20上方占比 (%)')
-ax2.fill_between(res.index, 0, 100, where=(res['pos']==1), color='#3b82f6', alpha=0.1)
-set_font(ax2, "市场广度波动环境")
-
-# 图3: 热度
-ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']>=0), color='#ef4444', alpha=0.5)
-ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']<0), color='#3b82f6', alpha=0.5)
-ax3.axhline(y=1.5, color='#d97706', linestyle='--', label='过热线')
-set_font(ax3, "资金热度 (20日 Z-Score)")
-
-# 图4: 对比
-ax4_r = ax4.twinx()
-ax4.plot(res.index, res['breadth'], color='#0f172a', label='广度')
-ax4_r.bar(res.index, res['new_high_pct'], color='#fbbf24', alpha=0.6, label='新高占比')
-set_font(ax4, "市场广度与季度强度对比")
-
-# 图5: ETF (修复截断错误)
-etfs = {"510050": "上证50", "510300": "沪深300", "510500": "中证500", "512100": "中证1000"}
-colors = ['#1e40af', '#166534', '#991b1b', '#6b21a8']
-for i, (code, label) in enumerate(etfs.items()):
-    ax5.plot(res.index, res[f'turnover_{code}'], label=label, color=colors[i], alpha=0.8)
-set_font(ax5, "核心风格 ETF 换手率对比")
-if my_font: ax5.legend(prop=my_font, ncol=4)
-
-plt.tight_layout()
-st.pyplot(fig)
+with tab3:
+    fig3, (ax4, ax5) = plt.subplots(2, 1, figsize=(16, 8), sharex=True)
+    # 新高
+    ax4_r = ax4.twinx()
+    ax4.plot(res.index, res['breadth'], color='#0f172a', alpha=0.3)
+    ax4_r.bar(res.index, res['new_high_pct'], color='#fbbf24', alpha=0.6, label='60日新高占比')
+    if my_font: ax4.set_title("季度强度 (60日新高比例)", fontproperties=my_font)
+    # ETF对比
+    colors = ['#1e40af', '#166534', '#991b1b', '#6b21a8']
+    labels = ["上证50", "沪深300", "中证500", "中证1000"]
+    etf_cols = [f'turnover_{c}' for c in ["510050", "510300", "510500", "512100"]]
+    for i, col in enumerate(etf_cols):
+        ax5.plot(res.index, res[col], label=labels[i], color=colors[i], alpha=0.8)
+    if my_font: ax5.set_title("核心风格 ETF 换手率监控", fontproperties=my_font)
+    ax5.legend(ncol=4)
+    st.pyplot(fig3)
 
 st.divider()
 
-# --- C. 实战决策报告 (找回并升级你的报告模块) ---
-st.subheader("📝 实战决策总结")
-
+# --- C. 实战决策总结 (Command Panel) ---
+st.subheader("📋 战术指令板")
 latest = res.iloc[-1]
 prev = res.iloc[-2]
 
-# 模式判定
+# 模式判定逻辑
 if latest['close'] > latest['MA_Filter'] and latest['MA_Filter'] > prev['MA_Filter']:
-    mode = "🐂 多头强趋势 (价格站上MA30且均线向上)"
+    mode, mode_color = "🐂 多头强趋势", "green"
 elif latest['close'] < latest['MA_Filter'] and latest['MA_Filter'] < prev['MA_Filter']:
-    mode = "🐻 空头弱趋势 (价格跌破MA30且均线向下)"
+    mode, mode_color = "🐻 空头弱趋势", "red"
 else:
-    mode = "🦓 震荡过渡期 (方向不明，建议减仓观望)"
+    mode, mode_color = "🦓 震荡整理期", "orange"
 
-# 操作建议
+# 指令判定
 signal, pos = latest['signal'], latest['pos']
-if signal == 1: 
-    action, status = "🚨 立即买入信号", "success"
-elif signal == -1: 
-    action, status = "🚨 立即卖出信号", "error"
-elif pos == 1: 
-    action, status = "💎 持股待涨", "info"
-else: 
-    action, status = "🛡️ 空仓观望", "warning"
+if signal == 1: action, status = "🚨 执行买入", "success"
+elif signal == -1: action, status = "🚨 执行卖出", "error"
+elif pos == 1: action, status = "💎 持股待涨", "info"
+else: action, status = "🛡️ 空仓等待", "secondary"
 
-# 逻辑扫描
-logic_desc = []
-if latest['breadth'] < 16: logic_desc.append("📉 广度冰点：全场仅16%个股站上均线，物极必反博弈点")
-if latest['Heat_Z'] > 1.5: logic_desc.append("🔥 资金过热：成交量快速放大，需警惕短期风格切换")
-if latest['new_high_pct'] > 5: logic_desc.append("💪 内生走强：创60日新高个股比例显著提升")
+c_left, c_right = st.columns([1, 2])
+with c_left:
+    st.write(f"**当前市场模式：** :{mode_color}[{mode}]")
+    if status == "success": st.success(f"### 指令：{action}")
+    elif status == "error": st.error(f"### 指令：{action}")
+    elif status == "info": st.info(f"### 指令：{action}")
+    else: st.warning(f"### 指令：{action}")
 
-st.info(f"""
-**1. 市场模式**：{mode}  
-**2. 资金热度**：{latest['Heat_Z']:.2f} (20日 Z-Score)  
-**3. 市场状态**：广度 {latest['breadth']:.2f}% | 60日新高比例 {latest['new_high_pct']:.2f}%  
-**4. 操作建议**：{action}  
-**5. 逻辑扫描**：{', '.join(logic_desc) if logic_desc else '目前处于常规波动区间'}
-""")
+with c_right:
+    # 逻辑扫描
+    logic_desc = []
+    if latest['breadth'] < 16: logic_desc.append("📉 [反转信号] 广度已进入冰点区 ( <16% )")
+    if latest['Heat_Z'] > 1.5: logic_desc.append("🔥 [预警信号] 资金热度异常过热 ( Z > 1.5 )")
+    if latest['new_high_pct'] > 5: logic_desc.append("💪 [强度信号] 季度走强个股显著增多")
+    
+    st.markdown("**实时风控/机会扫描：**")
+    if logic_desc:
+        for item in logic_desc: st.write(item)
+    else: st.write("✅ 暂无极端信号，维持系统现状。")
+    st.write(f"指标快照：广度 {latest['breadth']:.1f}% | 热度 {latest['Heat_Z']:.2f} | 新高比例 {latest['new_high_pct']:.2f}%")
