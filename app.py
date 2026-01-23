@@ -35,10 +35,10 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# ⚠️ 字体核心修复逻辑 (最稳健版本) ⚠️
+# ⚠️ 字体核心修复逻辑 (列表优先模式) ⚠️
 # ==========================================
 
-# 1. 每次启动清除缓存，防止 Matplotlib 记忆旧配置
+# 1. 每次启动清除缓存
 cache_path = os.path.expanduser('~/.cache/matplotlib')
 if os.path.exists(cache_path):
     try:
@@ -47,32 +47,25 @@ if os.path.exists(cache_path):
         pass
 
 # 2. 强制加载 SimHei.ttf
-# 请确保你的 github 仓库里 csi500_data 文件夹下有 SimHei.ttf (大小写敏感)
+# 确保你的 github 仓库里 csi500_data 文件夹下有 SimHei.ttf
 font_path = './csi500_data/SimHei.ttf'
 
 if os.path.exists(font_path):
-    # A. 把字体文件加入管理器
+    # A. 加入字体管理器
     fm.fontManager.addfont(font_path)
     
-    # B. 获取该文件的“真实内部名称” (关键步骤，不再去猜它叫什么)
-    prop = fm.FontProperties(fname=font_path)
-    custom_font_name = prop.get_name()
-    
-    # C. 设置为全局默认
-    plt.rcParams['font.family'] = custom_font_name
-    plt.rcParams['font.sans-serif'] = [custom_font_name] # 优先使用
-    plt.rcParams['axes.unicode_minus'] = False # 解决负号显示为方块
-    
-    # D. 侧边栏隐蔽提示 (调试用，如果看到这行字说明字体加载成功)
-    # st.sidebar.caption(f"🔧 系统日志: 已加载字体 {custom_font_name}")
+    # B. 关键修改：设置 sans-serif 列表，将 SimHei 放在第一位
+    # 这种方式比直接改 font.family 更稳健
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS']
+    plt.rcParams['axes.unicode_minus'] = False 
 else:
-    # 保底方案：如果没有 SimHei，尝试使用 Linux 系统自带的中文字体
-    st.sidebar.error(f"⚠️ 未找到 {font_path}，尝试使用系统备用字体")
-    plt.rcParams['font.sans-serif'] = ['Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
+    st.sidebar.error(f"⚠️ 未找到 {font_path}，请检查文件是否上传！")
+    # 保底
+    plt.rcParams['font.sans-serif'] = ['Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'sans-serif']
 
 # ==========================================
-# 后续逻辑 (完全保持不变)
+# 后续逻辑
 # ==========================================
 
 BACKTEST_START = "2024-01-01"
@@ -86,6 +79,7 @@ HEAT_WINDOW = 20
 @st.cache_data
 def load_data():
     path_prefix = "./csi500_data/"
+    # 简单的文件检查
     if not os.path.exists(f"{path_prefix}sh.000905.csv"):
         st.error("❌ 数据文件缺失，请检查 GitHub 仓库文件结构！")
         return pd.DataFrame()
@@ -251,6 +245,61 @@ ax4_left.legend(loc='upper left', fontsize=9)
 ax4_right.legend(loc='upper right', fontsize=9)
 ax4_right.set_ylabel("新高占比 %")
 
-# 5. ETF
+# 5. ETF (已修复截断问题)
 colors = ['#2c3e50', '#27ae60', '#c0392b', '#8e44ad']
-etfs = {"510050": "上证50", "51
+# 注意：下一行就是之前报错的地方，现在已经修复完整
+etfs = {"510050": "上证50", "510300": "沪深300", "510500": "中证500", "512100": "中证1000"}
+for i, (code, label) in enumerate(etfs.items()):
+    ax5.plot(res.index, res[f'turnover_{code}'], label=f"{label}", color=colors[i], alpha=0.8, linewidth=1.5)
+ax5.set_title("核心风格 ETF 换手率对比", fontsize=14, pad=10)
+ax5.legend(loc='upper left', ncol=4, fontsize=10)
+
+plt.tight_layout()
+st.pyplot(fig)
+
+st.divider()
+
+# --- 决策总结 ---
+st.subheader("📝 实战决策总结")
+latest = res.iloc[-1]
+prev = res.iloc[-2]
+
+if latest['close'] > latest['MA_Filter'] and latest['MA_Filter'] > prev['MA_Filter']:
+    mode, mode_desc, mode_color = "🐂 多头趋势", "价格站上MA30且均线向上", "green"
+elif latest['close'] < latest['MA_Filter'] and latest['MA_Filter'] < prev['MA_Filter']:
+    mode, mode_desc, mode_color = "🐻 空头趋势", "价格跌破MA30且均线向下", "red"
+else:
+    mode, mode_desc, mode_color = "🦓 震荡整理", "价格与均线纠缠或方向不明", "orange"
+
+signal, pos = latest['signal'], latest['pos']
+if signal == 1: action, action_type = "🚨 买入信号", "success"
+elif signal == -1: action, action_type = "🚨 卖出信号", "error"
+elif pos == 1: action, action_type = "💎 持股待涨", "info"
+else: action, action_type = "🛡️ 空仓观望", "secondary"
+
+logic_desc = []
+if latest['breadth'] < 16: logic_desc.append("📉 广度冰点")
+if latest['Heat_Z'] > 1.5: logic_desc.append("🔥 资金过热")
+if latest['new_high_pct'] > 5: logic_desc.append("💪 新高增强")
+final_logic = " | ".join(logic_desc) if logic_desc else "🌊 市场处于常规波动区间"
+
+with st.container():
+    c1, c2, c3, c4 = st.columns([1.5, 1, 1, 1.5])
+    with c1:
+        st.markdown(f"#### 1. 市场模式")
+        st.markdown(f"**{mode}**")
+        st.caption(mode_desc)
+    with c2:
+        st.markdown(f"#### 2. 资金热度")
+        st.metric("Z-Score", f"{latest['Heat_Z']:.2f}", delta=None)
+    with c3:
+        st.markdown(f"#### 3. 市场结构")
+        st.metric("广度 / 新高", f"{latest['breadth']:.0f}%", delta=f"{latest['new_high_pct']:.1f}% 新高")
+    with c4:
+        st.markdown(f"#### 4. 操作建议")
+        if action_type == "success": st.success(f"### {action}")
+        elif action_type == "error": st.error(f"### {action}")
+        elif action_type == "info": st.info(f"### {action}")
+        else: st.info(f"### {action}")
+
+    st.info(f"**逻辑扫描：** {final_logic}")
