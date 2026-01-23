@@ -5,33 +5,36 @@ import matplotlib.pyplot as plt
 import os
 
 # ==========================================
-# 1. 网页基础配置与核心参数 (修复乱码版)
+# 1. 网页基础配置与核心参数 (本地字体强力版)
 # ==========================================
 st.set_page_config(page_title="中证500量化实战决策中心", layout="wide")
 
-# --- 核心修复开始 ---
+import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import os
 
-# 1. 优先尝试加载 Linux 服务器上的中文字体 (Noto Sans CJK)
-# 这对应你在 packages.txt 里安装的 fonts-noto-cjk
-plt.rcParams['font.family'] = 'sans-serif'
-plt.rcParams['font.sans-serif'] = [
-    'Noto Sans CJK SC',    # Linux (Streamlit Cloud) 首选
-    'SimHei',              # Windows 首选
-    'Arial Unicode MS',    # Mac 首选
-    'DejaVu Sans'          # 英文保底
-]
+# --- 核心修复：直接加载本地字体文件 ---
+# 假设你把字体文件传到了 csi500_data 文件夹，文件名必须完全一致！
+font_path = './csi500_data/NotoSerifCJKsc-Regular.otf' 
 
-# 2. 解决负号显示为方块的问题
-plt.rcParams['axes.unicode_minus'] = False 
+# 检查字体文件是否真的存在
+if os.path.exists(font_path):
+    # 1. 将字体文件加入 matplotlib 的管理器
+    fm.fontManager.addfont(font_path)
+    # 2. 获取该字体的内部名称
+    custom_font = fm.FontProperties(fname=font_path)
+    font_name = custom_font.get_name()
+    # 3. 强制设置为全局默认字体
+    plt.rcParams['font.family'] = font_name
+    # print(f"成功加载字体: {font_name}") # 调试用
+else:
+    # 保底方案（如果文件没传对，还是尝试系统字体）
+    st.error(f"⚠️ 未找到字体文件：{font_path}，请检查路径！")
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS']
 
-# (可选) 强制清除字体缓存，防止 matplotlib 记忆旧的错误配置
-# 仅在 Streamlit Cloud 环境下偶尔需要，如果上面不行，解开下面这行注释
-import shutil
-# 强制清除 matplotlib 缓存目录，迫使它重新扫描字体
-shutil.rmtree(os.path.expanduser('~/.cache/matplotlib'), ignore_errors=True)
-
-# --- 核心修复结束 ---
+# 解决负号显示问题
+plt.rcParams['axes.unicode_minus'] = False
+# --- 修复结束 ---
 
 BACKTEST_START = "2024-01-01"
 BACKTEST_END   = "2026-01-15"
