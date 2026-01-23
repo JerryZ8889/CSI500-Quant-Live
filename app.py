@@ -27,8 +27,11 @@ plt.rcParams['axes.unicode_minus'] = False
 
 # (可选) 强制清除字体缓存，防止 matplotlib 记忆旧的错误配置
 # 仅在 Streamlit Cloud 环境下偶尔需要，如果上面不行，解开下面这行注释
-# import shutil
-# shutil.rmtree(os.path.expanduser('~/.cache/matplotlib'), ignore_errors=True)
+import shutil
+import os # 确保已经 import os
+# 强制清除 matplotlib 缓存目录，迫使它重新扫描字体
+shutil.rmtree(os.path.expanduser('~/.cache/matplotlib'), ignore_errors=True)
+
 # --- 核心修复结束 ---
 
 BACKTEST_START = "2024-01-01"
