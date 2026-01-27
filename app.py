@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import os
 import shutil
+from datetime import datetime  # 新增：用于处理时间显示
 
 # ==========================================
 # 1. 网页配置与视觉注入 (修复版)
@@ -156,6 +157,15 @@ res_bench = (1 + df_input['close'].pct_change().fillna(0)).cumprod()
 # 4. 终端级展示 (Professional Dashboard)
 # ==========================================
 st.title("🛡️ 中证500量化实战决策中心")
+
+# --- 新增：页面起始位置显示获得新数据时间 ---
+master_file_path = "./csi500_data/CSI500_Master_Strategy.csv"
+if os.path.exists(master_file_path):
+    mtime = os.path.getmtime(master_file_path)
+    last_update_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+    st.markdown(f"⏱️ **数据流最后同步时间**：`{last_update_str}` (基于 GitHub 库最新推送)")
+# --------------------------------------------
+
 st.caption(f"回测周期: {BACKTEST_START} 至 {BACKTEST_END} | 均线过滤: {ma_window}日 | 资金热度: {heat_window}日")
 
 # --- A. 核心绩效看板 ---
@@ -234,7 +244,7 @@ with c_l:
     st.write(f"**市场模式：** :{m_col}[{mode}]")
     if status == "success": st.success(f"### 指令：{action}")
     elif status == "error": st.error(f"### 指令：{action}")
-    elif status == "info": st.info(f"### 指令：{action}")
+    elif status == "info": st.info(f"### 指 line：{action}")
     else: st.warning(f"### 指令：{action}")
 
 with c_r:
