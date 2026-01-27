@@ -5,13 +5,10 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import os
 import shutil
-import requests
-from datetime import datetime, timedelta   # 用于处理动态时间
-import time
-import random
+from datetime import datetime  # 新增：用于处理时间显示
 
 # ==========================================
-# 1. 网页配置与视觉注入
+# 1. 网页配置与视觉注入 (修复版)
 # ==========================================
 st.set_page_config(page_title="中证500量化实战决策中心", layout="wide", initial_sidebar_state="expanded")
 
@@ -35,6 +32,7 @@ font_path = './csi500_data/SimHei.ttf'
 my_font = None
 if os.path.exists(font_path):
     try:
+        # 暴力清缓存确保 SimHei 加载
         cache_dir = os.path.expanduser('~/.cache/matplotlib')
         if os.path.exists(cache_dir): shutil.rmtree(cache_dir, ignore_errors=True)
         fm.fontManager.addfont(font_path)
@@ -44,15 +42,12 @@ if os.path.exists(font_path):
     except: pass
 
 # ==========================================
-# 2. 侧边栏：动态参数调节 (已修改日期默认值)
+# 2. 侧边栏：动态参数调节
 # ==========================================
 with st.sidebar:
     st.header("⚙️ 策略参数配置")
-    # 修改点：默认结束日期设为 datetime.now()
-    default_start = pd.to_datetime("2024-01-01")
-    default_end = pd.to_datetime(datetime.now().date())
-    
-    date_range = st.date_input("回测时间跨度", [default_start, default_end])
+    date_range = st.date_input("回测时间跨度", 
+                               [pd.to_datetime("2024-01-01"), pd.to_datetime("2026-01-15")])
     st.divider()
     ma_window = st.slider("均线趋势过滤窗口 (MA)", 10, 60, 30)
     heat_window = st.slider("成交量热度窗口", 5, 40, 20)
@@ -60,15 +55,13 @@ with st.sidebar:
     st.info("💡 建议：宽幅震荡市调大均线窗口，快速反弹市调小窗口。")
 
 # 转换日期格式
-if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+if isinstance(date_range, list) and len(date_range) == 2:
     BACKTEST_START, BACKTEST_END = date_range[0].strftime('%Y-%m-%d'), date_range[1].strftime('%Y-%m-%d')
 else:
-    # 兜底逻辑：如果用户只选了一个日期，结束日期默认为今天
-    BACKTEST_START = date_range[0].strftime('%Y-%m-%d') if isinstance(date_range, (list, tuple)) else "2024-01-01"
-    BACKTEST_END = datetime.now().strftime('%Y-%m-%d')
+    BACKTEST_START, BACKTEST_END = "2024-01-01", "2026-01-15"
 
 # ==========================================
-# 3. 数据与引擎
+# 3. 数据与引擎 (修复 KeyError 逻辑)
 # ==========================================
 @st.cache_data
 def load_data(s_date, e_date, ma_win, h_win):
@@ -82,6 +75,7 @@ def load_data(s_date, e_date, ma_win, h_win):
     df = pd.merge(df_index, df_breadth[['date', 'breadth']], on='date', how='inner')
     df = pd.merge(df, df_master[['date', 'new_high_pct', 'ETF_Turnover']], on='date', how='left')
     
+    # --- 修复后的 ETF 换手处理 ---
     etf_codes = ["510050", "510300", "510500", "512100"]
     for code in etf_codes:
         f_path = f"{path_prefix}{code}.csv"
@@ -89,6 +83,7 @@ def load_data(s_date, e_date, ma_win, h_win):
         if os.path.exists(f_path):
             etf_df = pd.read_csv(f_path)
             etf_df['date'] = pd.to_datetime(etf_df['date'])
+            # 采用显式重命名，彻底解决 KeyError
             etf_df = etf_df[['date', 'turnover']].rename(columns={'turnover': target_col})
             df = pd.merge(df, etf_df, on='date', how='left')
             df[target_col] = df[target_col].fillna(0)
@@ -107,6 +102,7 @@ def load_data(s_date, e_date, ma_win, h_win):
     t_raw = df['ETF_Turnover']
     df['Turnover_Pct'] = np.where(t_raw.max() > 1, t_raw, t_raw * 100)
     
+    # 截取选定时间段
     return df.sort_values('date').set_index('date').loc[s_date:e_date]
 
 def run_strategy(df_main):
@@ -152,65 +148,23 @@ def run_strategy(df_main):
     temp['cum_ret'] = (1 + temp['strat_ret']).cumprod()
     return temp
 
-# 加载数据（会根据 BACKTEST_END 自动包含最新数据）
+# 数据加载
 df_input = load_data(BACKTEST_START, BACKTEST_END, ma_window, heat_window)
 res = run_strategy(df_input)
 res_bench = (1 + df_input['close'].pct_change().fillna(0)).cumprod()
 
 # ==========================================
-# 4. 终端级展示
+# 4. 终端级展示 (Professional Dashboard)
 # ==========================================
 st.title("🛡️ 中证500量化实战决策中心")
 
-# ==========================================
-# 🆕 新增：直接读取 GitHub API 获取真实更新时间
-# ==========================================
-@st.cache_data(ttl=0) # 设置缓存0分钟，避免频繁请求被GitHub限流
-def get_github_last_commit_time(repo_name, path):
-    """
-    通过 GitHub API 获取指定文件夹最后一次 Commit 的时间
-    """
-    api_url = f"https://api.github.com/repos/{repo_name}/commits?path={path}&page=1&per_page=1"
-    
-    # 如果你的仓库是私有的，需要在这里填 Token
-    # headers = {"Authorization": "token ghp_xxxx..."} 
-    # 如果是公开仓库，headers 留空即可
-    headers = {} 
-
-    try:
-        response = requests.get(api_url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            if len(data) > 0:
-                # GitHub 返回的是 UTC 时间 (ISO 8601格式): 2026-01-28T09:18:03Z
-                utc_time_str = data[0]['commit']['committer']['date']
-                
-                # 解析并转换为 datetime 对象
-                utc_dt = datetime.strptime(utc_time_str, "%Y-%m-%dT%H:%M:%SZ")
-                
-                # 暴力转为北京时间 (UTC+8)
-                beijing_dt = utc_dt + timedelta(hours=8)
-                
-                return beijing_dt.strftime('%Y-%m-%d %H:%M:%S'), True
-    except Exception as e:
-        pass
-    
-    return "无法连接 GitHub", False
-
-# --- 调用函数 ---
-# ⚠️ 请确认这里填对了你的 GitHub 用户名/仓库名
-REPO_Config = "JerryZ8889/CSI500-Quant-Live" 
-FOLDER_Path = "csi500_data"
-
-last_update_str, is_success = get_github_last_commit_time(REPO_Config, FOLDER_Path)
-
-if is_success:
-    st.markdown(f"⏱️ **GitHub 数据流最后同步时间**：`{last_update_str}` (北京时间)")
-else:
-    # 如果 API 失败，启用本地文件兜底
-    st.markdown(f"⏱️ **数据流状态**：API连接超时，显示本地缓存时间")
-
-
+# --- 新增：页面起始位置显示获得新数据时间 ---
+master_file_path = "./csi500_data/CSI500_Master_Strategy.csv"
+if os.path.exists(master_file_path):
+    mtime = os.path.getmtime(master_file_path)
+    last_update_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+    st.markdown(f"⏱️ **数据流最后同步时间**：`{last_update_str}` (基于 GitHub 库最新推送)")
+# --------------------------------------------
 
 st.caption(f"回测周期: {BACKTEST_START} 至 {BACKTEST_END} | 均线过滤: {ma_window}日 | 资金热度: {heat_window}日")
 
@@ -266,7 +220,7 @@ with tab3:
 
 st.divider()
 
-# --- C. 战术指令板 (基于数据集最后一行的实时判断) ---
+# --- C. 战术指令板 ---
 latest = res.iloc[-1]
 prev = res.iloc[-2]
 
@@ -287,44 +241,47 @@ else: action, status = "🛡️ 空仓等待", "secondary"
 
 c_l, c_r = st.columns([1, 2])
 with c_l:
-    st.write(f"**市场模式（截至 {latest.name.strftime('%Y-%m-%d')}）：** :{m_col}[{mode}]")
+    st.write(f"**市场模式：** :{m_col}[{mode}]")
     if status == "success": st.success(f"### 指令：{action}")
     elif status == "error": st.error(f"### 指令：{action}")
-    elif status == "info": st.info(f"### 指令：{action}")
+    elif status == "info": st.info(f"### 指 line：{action}")
     else: st.warning(f"### 指令：{action}")
 
 with c_r:
+    # 1. 初始化深度逻辑列表
     logic_desc = []
     
-    # 深度维度 A：市场广度
+    # --- 深度维度 A：市场广度 (Breadth) ---
     if latest['breadth'] < 16:
-        logic_desc.append("📉 **[极端冰点逻辑]**：全场仅不足16%个股站上均线。历史经验表明，此阶段市场处于极度恐慌或卖盘枯竭状态，极易触发“物极必反”的报复性反抽。")
+        logic_desc.append("📉 **[极端冰点逻辑]**：全场仅不足16%个股站上均线。历史经验表明，此阶段市场处于极度恐慌或卖盘枯竭状态，极易触发“物极必反”的报复性反抽，适合左侧关注，但不宜盲目重仓。")
     elif latest['breadth'] > 80:
-        logic_desc.append("🚩 **[广度高位警示]**：超80%个股已在均线上方。这通常是趋势亢奋期的特征，需警惕高位震荡或“缩量阴跌”的开始。")
+        logic_desc.append("🚩 **[广度高位警示]**：超80%个股已在均线上方。这通常是趋势亢奋期的特征，虽然赚钱效应好，但也意味着潜在买盘可能耗尽，需警惕高位震荡或“缩量阴跌”的开始。")
     
-    # 深度维度 B：资金热度
+    # --- 深度维度 B：资金热度 (Heat Z-Score) ---
     if latest['Heat_Z'] > 1.5:
-        logic_desc.append("🔥 **[情绪过热逻辑]**：成交量爆出近20日均值1.5倍标准差。量能极速释放后往往伴随动能衰竭，警惕回撤。")
+        logic_desc.append("🔥 **[情绪过热逻辑]**：成交量爆出近20日均值1.5倍标准差。这代表市场情绪已达高潮。量能极速释放后往往伴随动能衰竭，实战中应警惕“最后一把火”后的快速回撤。")
     elif latest['Heat_Z'] < -1.5:
-        logic_desc.append("🧊 **[交投冷清逻辑]**：成交极度萎缩。波动率将降低，适合耐心等待放量信号出现。")
+        logic_desc.append("🧊 **[交投冷清逻辑]**：成交极度萎缩。这通常发生在阴跌末期或长假前，市场缺乏主攻资金，波动率将降低，适合耐心等待放量信号出现。")
         
-    # 深度维度 C：季度强度
+    # --- 深度维度 C：季度强度 (New Highs) ---
     if latest['new_high_pct'] > 5:
-        logic_desc.append("💪 **[内生动力增强]**：创60日新高的个股占比显著。具备广泛的“赚钱效应”，趋势延续性较强。")
+        logic_desc.append("💪 **[内生动力增强]**：创60日新高的个股占比显著。这表明市场并非仅靠少数权重股拉升，而是具备广泛的“赚钱效应”和“领涨先锋”，趋势的延续性通常较强。")
     
-    # 深度维度 D：趋势保护
+    # --- 深度维度 D：趋势保护 (MA Filter) ---
     if latest['close'] > latest['MA_Filter']:
-        logic_desc.append("✅ **[趋势生命线保护]**：当前价格站稳在 MA 过滤线之上。中线“看多做多”逻辑基石稳固。")
+        logic_desc.append("✅ **[趋势生命线保护]**：当前价格站稳在 MA30 之上，且均线具备正向斜率。只要不放量跌破该防守位，中线“看多做多”的逻辑基石依然稳固。")
     else:
-        logic_desc.append("⚠️ **[趋势压制风险]**：价格处于 MA 过滤线下方。属于典型的空头排布，反弹应视为技术性修正。")
+        logic_desc.append("⚠️ **[趋势压制风险]**：价格处于 MA30 下方。这属于典型的空头排布，任何反弹在没有收复生命线之前，都应视为“技术性抽风”而非真正的反转。")
 
+    # 2. UI 渲染
     st.markdown("#### 🔍 逻辑实时深度扫描：")
     
     if logic_desc:
         for item in logic_desc:
             st.write(item)
     else:
-        st.write("✅ **[状态正常]**：目前各项指标处于常规波动区间。建议遵循原有策略惯性运行。")
+        st.write("✅ **[状态正常]**：目前各项指标处于常规波动区间。未捕捉到极端过热、冰点或趋势拐点信号，建议遵循原有策略惯性运行。")
     
     st.divider()
-    st.caption(f"指标快照：广度 {latest['breadth']:.1f}% | 热度 {latest['Heat_Z']:.2f}σ | 季度新高比例 {latest['new_high_pct']:.2f}%")
+    # 增加一个技术快照栏
+    st.caption(f"指标快照：广度 {latest['breadth']:.1f}% | 20日热度 {latest['Heat_Z']:.2f}σ | 季度新高比例 {latest['new_high_pct']:.2f}%")
