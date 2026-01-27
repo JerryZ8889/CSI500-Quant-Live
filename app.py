@@ -47,7 +47,7 @@ if os.path.exists(font_path):
 with st.sidebar:
     st.header("⚙️ 策略参数配置")
     date_range = st.date_input("回测时间跨度", 
-                               [pd.to_datetime("2024-01-01"), pd.to_datetime("2026-01-15")])
+                               [pd.to_datetime("2024-01-01"), datetime.now()])
     st.divider()
     ma_window = st.slider("均线趋势过滤窗口 (MA)", 10, 60, 30)
     heat_window = st.slider("成交量热度窗口", 5, 40, 20)
