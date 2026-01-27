@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import os
 import shutil
-from datetime import datetime  # 用于处理动态时间
+import requests
+from datetime import datetime, timedelta   # 用于处理动态时间
 
 # ==========================================
 # 1. 网页配置与视觉注入
