@@ -163,53 +163,47 @@ res_bench = (1 + df_input['close'].pct_change().fillna(0)).cumprod()
 st.title("🛡️ 中证500量化实战决策中心")
 
 # ==========================================
-# 🆕 新增：直接读取 GitHub API 获取真实更新时间
+# 🆕 终极方案：直接读取 Raw CSV 数据内容
 # ==========================================
-@st.cache_data(ttl=0) # 设置缓存0分钟，避免频繁请求被GitHub限流
-def get_github_last_commit_time(repo_name, path):
+@st.cache_data(ttl=60) # 1分钟缓存即可
+def get_data_freshness(repo, branch="main"):
     """
-    通过 GitHub API 获取指定文件最后一次 Commit 的时间
+    直接从 GitHub Raw 链接读取 CSV 的最后一行日期
+    优点：绝对真实，不受 Git Commit 时间缓存影响
     """
-    # 关键修改：在 URL 后面加一个随机的时间戳参数 (t=...)
-    # 这会欺骗 GitHub API，让它以为这是一个新请求，从而绕过 GitHub 的服务端缓存
-    timestamp = int(time.time())
-    rand_num = random.randint(1, 1000)
-    api_url = f"https://api.github.com/repos/{repo_name}/commits?path={path}&page=1&per_page=1&t={timestamp}{rand_num}"
+    # 构造 Raw URL (注意：如果是私有仓库，这个方法需要加 Token，公开仓库直接用)
+    # 你的仓库看起来是公开的，直接读
+    url = f"https://raw.githubusercontent.com/{repo}/{branch}/csi500_data/CSI500_Master_Strategy.csv"
     
-    # 如果是公开仓库，headers 留空即可；私有仓库需填 Token
-    headers = {
-        "Cache-Control": "no-cache" # 再次尝试告诉 GitHub 不要缓存
-    } 
+    # 加个随机数防止 pandas 读取缓存
+    import time
+    import random
+    url_nocache = f"{url}?t={int(time.time())}_{random.randint(1,1000)}"
 
     try:
-        response = requests.get(api_url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            if len(data) > 0:
-                # 获取 UTC 时间
-                utc_time_str = data[0]['commit']['committer']['date']
-                utc_dt = datetime.strptime(utc_time_str, "%Y-%m-%dT%H:%M:%SZ")
-                
-                # 转为北京时间 (UTC+8)
-                beijing_dt = utc_dt + timedelta(hours=8)
-                return beijing_dt.strftime('%Y-%m-%d %H:%M:%S'), True
+        # 只读取最后几行，极速
+        df_tail = pd.read_csv(url_nocache).tail(1)
+        if not df_tail.empty:
+            last_date = df_tail['date'].values[0]
+            return last_date, True
     except Exception as e:
-        print(f"GitHub API Error: {e}")
-        pass
+        return str(e), False
     
-    return "无法连接 GitHub", False
+    return "未知", False
 
-# --- 调用函数 ---
-REPO_Config = "JerryZ8889/CSI500-Quant-Live" 
-# 修改点：不再监控整个文件夹，而是监控那个最核心的策略文件，这最准确
-FOLDER_Path = "csi500_data/CSI500_Master_Strategy.csv"
+# --- 调用 ---
+REPO_NAME = "JerryZ8889/CSI500-Quant-Live"
+BRANCH_NAME = "main" # ⚠️ 请确认你的分支名是 main 还是 master
 
-last_update_str, is_success = get_github_last_commit_time(REPO_Config, FOLDER_Path)
+data_date, success = get_data_freshness(REPO_NAME, BRANCH_NAME)
 
-if is_success:
-    st.markdown(f"⏱️ **数据流最后同步时间**：`{last_update_str}` (北京时间)")
+if success:
+    # 显示的是数据里真实的日期
+    st.markdown(f"⏱️ **数据流最新交易日**：`{data_date}` (源自 GitHub 实盘数据)")
 else:
-    st.markdown(f"⏱️ **数据流状态**：API连接超时，显示本地缓存时间")
+    st.markdown(f"⏱️ **数据流状态**：无法连接 GitHub Raw 源 ({data_date})")
+
+
 
 st.caption(f"回测周期: {BACKTEST_START} 至 {BACKTEST_END} | 均线过滤: {ma_window}日 | 资金热度: {heat_window}日")
 
