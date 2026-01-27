@@ -58,7 +58,7 @@ with st.sidebar:
 if isinstance(date_range, list) and len(date_range) == 2:
     BACKTEST_START, BACKTEST_END = date_range[0].strftime('%Y-%m-%d'), date_range[1].strftime('%Y-%m-%d')
 else:
-    BACKTEST_START, BACKTEST_END = "2024-01-01", datetime.now().strftime('%Y-%m-%d')"
+    BACKTEST_START, BACKTEST_END = "2024-01-01", datetime.now().strftime('%Y-%m-%d')
 
 # ==========================================
 # 3. 数据与引擎 (修复 KeyError 逻辑)
