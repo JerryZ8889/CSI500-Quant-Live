@@ -244,7 +244,7 @@ with c_l:
     st.write(f"**市场模式：** :{m_col}[{mode}]")
     if status == "success": st.success(f"### 指令：{action}")
     elif status == "error": st.error(f"### 指令：{action}")
-    elif status == "info": st.info(f"### 指 line：{action}")
+    elif status == "info": st.info(f"### 指令：{action}")
     else: st.warning(f"### 指令：{action}")
 
 with c_r:
