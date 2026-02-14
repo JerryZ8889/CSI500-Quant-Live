@@ -4,8 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import os
-import shutil
-from datetime import datetime  # 新增：用于处理时间显示
+from datetime import datetime
 
 # ==========================================
 # 1. 网页配置与视觉注入 (修复版)
@@ -32,14 +31,12 @@ font_path = './csi500_data/SimHei.ttf'
 my_font = None
 if os.path.exists(font_path):
     try:
-        # 暴力清缓存确保 SimHei 加载
-        cache_dir = os.path.expanduser('~/.cache/matplotlib')
-        if os.path.exists(cache_dir): shutil.rmtree(cache_dir, ignore_errors=True)
         fm.fontManager.addfont(font_path)
         my_font = fm.FontProperties(fname=font_path)
         plt.rcParams['font.family'] = my_font.get_name()
-        plt.rcParams['axes.unicode_minus'] = False 
-    except: pass
+        plt.rcParams['axes.unicode_minus'] = False
+    except Exception:
+        pass
 
 # ==========================================
 # 2. 侧边栏：动态参数调节
@@ -55,7 +52,7 @@ with st.sidebar:
     st.info("💡 建议：宽幅震荡市调大均线窗口，快速反弹市调小窗口。")
 
 # 转换日期格式
-if isinstance(date_range, list) and len(date_range) == 2:
+if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
     BACKTEST_START, BACKTEST_END = date_range[0].strftime('%Y-%m-%d'), date_range[1].strftime('%Y-%m-%d')
 else:
     BACKTEST_START, BACKTEST_END = "2024-01-01", datetime.now().strftime('%Y-%m-%d')
@@ -188,35 +185,59 @@ with tab1:
     fig1, ax1 = plt.subplots(figsize=(16, 6))
     ax1.plot(res_bench, label='中证500基准', color='#94a3b8', alpha=0.4, linestyle='--')
     ax1.plot(res['cum_ret'], label='策略净值', color='#e11d48', linewidth=2)
-    for sig, col, mark in [(1, '#ef4444', '^'), (-1, '#22c55e', 'v')]:
+    for sig, col, mark, lbl in [(1, '#ef4444', '^', '买入信号'), (-1, '#22c55e', 'v', '卖出信号')]:
         pts = res[res['signal'] == sig]
-        ax1.scatter(pts.index, res.loc[pts.index, 'cum_ret'], color=col, marker=mark, s=150, zorder=5)
-    if my_font: ax1.set_title("策略净值表现与信号点分布", fontproperties=my_font, fontsize=16)
-    ax1.legend()
+        ax1.scatter(pts.index, res.loc[pts.index, 'cum_ret'], color=col, marker=mark, s=150, zorder=5, label=lbl)
+    title_text = "策略净值表现与信号点分布"
+    ax1.set_title(title_text, fontproperties=my_font, fontsize=16) if my_font else ax1.set_title(title_text, fontsize=16)
+    ax1.legend(loc='upper left')
+    ax1.grid(True, alpha=0.3)
+    fig1.tight_layout()
     st.pyplot(fig1)
+    plt.close(fig1)
 
 with tab2:
     fig2, (ax2, ax3) = plt.subplots(2, 1, figsize=(16, 10), sharex=True)
     ax2.plot(res.index, res['breadth'], color='#f59e0b', label='MA20上方占比 (%)')
-    ax2.fill_between(res.index, 0, 100, where=(res['pos']==1), color='#3b82f6', alpha=0.1)
-    if my_font: ax2.set_title("市场广度监控", fontproperties=my_font)
-    ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']>=0), color='#ef4444', alpha=0.5)
-    ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']<0), color='#3b82f6', alpha=0.5)
-    if my_font: ax3.set_title("资金成交热度 (Heat Z-Score)", fontproperties=my_font)
+    ax2.fill_between(res.index, 0, 100, where=(res['pos']==1), color='#3b82f6', alpha=0.1, label='持仓区间')
+    ax2.axhline(y=16, color='#22c55e', linestyle='--', alpha=0.6, label='冰点线 (16%)')
+    ax2.axhline(y=80, color='#ef4444', linestyle='--', alpha=0.6, label='过热线 (80%)')
+    title_b = "市场广度监控"
+    ax2.set_title(title_b, fontproperties=my_font) if my_font else ax2.set_title(title_b)
+    ax2.legend(loc='upper left')
+    ax2.grid(True, alpha=0.3)
+    ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']>=0), color='#ef4444', alpha=0.5, label='过热 (Z>0)')
+    ax3.fill_between(res.index, 0, res['Heat_Z'], where=(res['Heat_Z']<0), color='#3b82f6', alpha=0.5, label='冷清 (Z<0)')
+    ax3.axhline(y=1.5, color='#ef4444', linestyle=':', alpha=0.6, label='过热阈值 (1.5σ)')
+    ax3.axhline(y=-1.5, color='#3b82f6', linestyle=':', alpha=0.6, label='冰点阈值 (-1.5σ)')
+    title_h = "资金成交热度 (Heat Z-Score)"
+    ax3.set_title(title_h, fontproperties=my_font) if my_font else ax3.set_title(title_h)
+    ax3.legend(loc='upper left')
+    ax3.grid(True, alpha=0.3)
+    fig2.tight_layout()
     st.pyplot(fig2)
+    plt.close(fig2)
 
 with tab3:
     fig3, (ax4, ax5) = plt.subplots(2, 1, figsize=(16, 10), sharex=True)
-    ax4_r = ax4.twinx()
-    ax4_r.bar(res.index, res['new_high_pct'], color='#fbbf24', alpha=0.6, label='60日新高占比')
-    if my_font: ax4.set_title("季度走强个股比例 (60日新高)", fontproperties=my_font)
+    ax4.bar(res.index, res['new_high_pct'], color='#fbbf24', alpha=0.6, label='60日新高占比 (%)')
+    ax4.axhline(y=5, color='#ef4444', linestyle='--', alpha=0.6, label='强势阈值 (5%)')
+    title_nh = "季度走强个股比例 (60日新高)"
+    ax4.set_title(title_nh, fontproperties=my_font) if my_font else ax4.set_title(title_nh)
+    ax4.set_ylabel('%')
+    ax4.legend(loc='upper left')
+    ax4.grid(True, alpha=0.3)
     colors = ['#1e40af', '#166534', '#991b1b', '#6b21a8']
     labels = ["上证50", "沪深300", "中证500", "中证1000"]
     for i, code in enumerate(["510050", "510300", "510500", "512100"]):
         ax5.plot(res.index, res[f'turnover_{code}'], label=labels[i], color=colors[i], alpha=0.8)
-    if my_font: ax5.set_title("核心风格 ETF 换手率监控", fontproperties=my_font)
-    ax5.legend(ncol=4)
+    title_tr = "核心风格 ETF 换手率监控"
+    ax5.set_title(title_tr, fontproperties=my_font) if my_font else ax5.set_title(title_tr)
+    ax5.legend(ncol=4, loc='upper left')
+    ax5.grid(True, alpha=0.3)
+    fig3.tight_layout()
     st.pyplot(fig3)
+    plt.close(fig3)
 
 st.divider()
 
@@ -283,5 +304,9 @@ with c_r:
         st.write("✅ **[状态正常]**：目前各项指标处于常规波动区间。未捕捉到极端过热、冰点或趋势拐点信号，建议遵循原有策略惯性运行。")
     
     st.divider()
-    # 增加一个技术快照栏
-    st.caption(f"指标快照：广度 {latest['breadth']:.1f}% | 20日热度 {latest['Heat_Z']:.2f}σ | 季度新高比例 {latest['new_high_pct']:.2f}%")
+    # 技术快照栏
+    snap_cols = st.columns(4)
+    snap_cols[0].metric("广度", f"{latest['breadth']:.1f}%")
+    snap_cols[1].metric("20日热度", f"{latest['Heat_Z']:.2f}σ")
+    snap_cols[2].metric("季度新高", f"{latest['new_high_pct']:.2f}%")
+    snap_cols[3].metric("MA{0}".format(ma_window), f"{latest['MA_Filter']:.2f}")
